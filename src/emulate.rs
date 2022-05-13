@@ -1,7 +1,8 @@
 #![allow(arithmetic_overflow)]
+use std::io;
 
 // SZ0A0P1C
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 struct Flags {
   s: bool,
   z: bool,
@@ -33,8 +34,8 @@ struct State {
 }
 
 impl State {
-  fn new(mem_size: usize) -> State {
-    State { a: 0, b: 0, c: 0, d: 0, e: 0, h: 0, l: 0, sp: 0, pc: 0, cc: Flags::new(), ie: false, mem: Vec::with_capacity(mem_size) }
+  fn new(mem: Vec<u8>) -> State {
+    State { a: 0, b: 0, c: 0, d: 0, e: 0, h: 0, l: 0, sp: 0, pc: 0, cc: Flags::new(), ie: false, mem }
   }
   
   /// execute single command
@@ -48,13 +49,15 @@ impl State {
     } else {
       0
     };
+    
+    println!("op: {:04X}", opcode);
 
     match opcode {
       0x01 | 0x11 | 0x21 | 0x31 => {
-        self.set_reg_pair(rp, hblb);
+        self.set_reg_pair(rp, hblb, false);
         self.pc += 2;
       },
-      0x03 | 0x13 | 0x23 | 0x33 => self.set_reg_pair(rp, self.get_reg_pair(rp, false) + 1),
+      0x03 | 0x13 | 0x23 | 0x33 => self.set_reg_pair(rp, self.get_reg_pair(rp, false) + 1, false),
       0x04 | 0x0C | 0x14 | 0x1C | 0x24 | 0x2C | 0x34 | 0x3C => {
         self.set_reg(d, self.get_reg(d) + 1);
         self.cc(self.get_reg(d));
@@ -65,7 +68,7 @@ impl State {
       },
       0x07 | 0x17 => self.rl(opcode == 0x17),
       0x09 | 0x19 | 0x29 | 0x39 => self.dad(rp),
-      0x0B | 0x1B | 0x2B | 0x3B => self.set_reg_pair(rp, self.get_reg_pair(rp, false) - 1),
+      0x0B | 0x1B | 0x2B | 0x3B => self.set_reg_pair(rp, self.get_reg_pair(rp, false) - 1, false),
       0x0F | 0x1F => self.rr(opcode == 0x1F),
       0x2F => self.a = !self.a,
       0x37 => self.cc.cy = true,
@@ -80,22 +83,25 @@ impl State {
       0xB8..=0xBF => self.cmp(self.get_reg(s)),
       0xC0 | 0xC8 | 0xD0 | 0xD8 | 0xE0 | 0xE8 | 0xF0 | 0xF8 => {
         if self.get_ccc(d) {
-          self.pc = self.pop() as usize;
+          self.pc = (self.pop() as usize) - 1;
         }
       },
-      0xC1 | 0xD1 | 0xE1 | 0xF1 => self.set_reg_pair(rp, self.pop(), true),
+      0xC1 | 0xD1 | 0xE1 | 0xF1 => {
+        let db = self.pop();
+        self.set_reg_pair(rp, db, true)
+      },
       0xC2 | 0xCA | 0xD2 | 0xDA | 0xE2 | 0xEA | 0xF2 | 0xFA => {
         if self.get_ccc(d) {
-          self.pc = hblb as usize;
+          self.pc = (hblb as usize) -1;
         } else {
           self.pc += 2;
         }
       },
-      0xC3 => self.pc = hblb as usize,
+      0xC3 => self.pc = (hblb as usize) - 1,
       0xC4 | 0xCC | 0xD4 | 0xDC | 0xE4 | 0xEC | 0xF4 | 0xFC => {
         if self.get_ccc(d) {
           self.push((self.pc + 2) as u16);
-          self.pc = hblb as usize;
+          self.pc = (hblb as usize) - 1;
         } else {
           self.pc += 2;
         }
@@ -107,9 +113,9 @@ impl State {
       },
       0xC7 | 0xCF | 0xD7 | 0xDF | 0xE7 | 0xEF | 0xF7 | 0xFF => {
         self.push((self.pc + 2) as u16);
-        self.pc = d as usize;
+        self.pc = (d as usize) - 1;
       },
-      0xC9 => self.pc = self.pop() as usize,
+      0xC9 => self.pc = (self.pop() as usize) - 1,
       0xCD => {
         self.push((self.pc + 2) as u16);
         self.pc = hblb as usize;
@@ -130,7 +136,7 @@ impl State {
         self.and(self.mem[self.pc+1]);
         self.pc += 1;
       },
-      0xE9 => self.pc = self.get_reg_pair(0x2, false) as usize,
+      0xE9 => self.pc = (self.get_reg_pair(0x2, false) as usize) - 1,
       0xEB => {
         let (hb, lb) = (self.d, self.e);
         self.d = self.h;
@@ -241,6 +247,61 @@ impl State {
     }
   }
 
+  fn get_opcode(&self, index: usize) -> &'static str {
+    match self.mem[index] {
+      0x01	=> "LXI B,D16",
+      0x05	=> "DCR B",
+      0x06	=> "MVI B,D8",
+      0x09	=> "DAD B",
+      0x0d	=> "DCR C",
+      0x0e	=> "MVI C,D8",
+      0x0f	=> "RRC",
+      0x11	=> "LXI D,D16",
+      0x13	=> "INX D",
+      0x19	=> "DAD D",
+      0x1a	=> "LDAX D",
+      0x21	=> "LXI H,D16",
+      0x23	=> "INX H",
+      0x26	=> "MVI H,D8",
+      0x29	=> "DAD H",
+      0x31	=> "LXI SP,D16",
+      0x32	=> "STA adr",
+      0x36	=> "MVI M,D8",
+      0x3a	=> "LDA adr",
+      0x3e	=> "MVI A,D8",
+      0x56	=> "MOV D,M",
+      0x5e	=> "MOV E,M",
+      0x66	=> "MOV H,M",
+      0x6f	=> "MOV L,A",
+      0x77	=> "MOV M,A",
+      0x7a	=> "MOV A,D",
+      0x7b	=> "MOV A,E",
+      0x7c	=> "MOV A,H",
+      0x7e	=> "MOV A,M",
+      0xa7	=> "ANA A",
+      0xaf	=> "XRA A",
+      0xc1	=> "POP B",
+      0xc2	=> "JNZ adr",
+      0xc3	=> "JMP adr",
+      0xc5	=> "PUSH B",
+      0xc6	=> "ADI D8",
+      0xc9	=> "RET",
+      0xcd	=> "CALL adr",
+      0xd1	=> "POP D",
+      0xd3	=> "OUT D8",
+      0xd5	=> "PUSH D",
+      0xe1	=> "POP H",
+      0xe5	=> "PUSH H",
+      0xe6	=> "ANI D8",
+      0xeb	=> "XCHG",
+      0xf1	=> "POP PSW",
+      0xf5	=> "PUSH PSW",
+      0xfb	=> "EI",
+      0xfe	=> "CPI D8",
+      _ => "NOP",
+    }
+  }
+
   /// And value with A
   fn and(&mut self, db: u8) {
     self.a &= db;
@@ -277,7 +338,7 @@ impl State {
   fn dad(&mut self, rp: u8) {
     let ans = self.get_reg_pair(0x2, false) as u32 + self.get_reg_pair(rp, false) as u32;
     self.cc.cy = ans > 0xFFFF;
-    self.set_reg_pair(0x2, ans as u16);
+    self.set_reg_pair(0x2, ans as u16, false);
   }
 
   /// Or value with A
@@ -291,6 +352,27 @@ impl State {
     let ret = (self.mem[self.sp + 1] as u16) << 8 | self.mem[self.sp] as u16;
     self.sp += 2;
     ret
+  }
+
+  fn print(&self) {
+    let print_state = [
+      format!("A:\t{:02X}\t\tS:\t{}\t\tPC:\t", self.a, self.cc.s as u8),
+      format!("BC:\t{:02X} {:02X}\t\tZ:\t{}\t\t\t", self.b, self.c, self.cc.z as u8),
+      format!("DE:\t{:02X} {:02X}\t\tAC:\t{}\t\t->\t", self.d, self.e, self.cc.ac as u8),
+      format!("HL:\t{:02X} {:02X}\t\tP:\t{}\t\t\t", self.h, self.l, self.cc.p as u8),
+      format!("SP:\t{:04X}\t\tCY:\t{}\t\t\t", self.sp, self.cc.cy as u8),
+      format!("\t{:02X} {:02X}\t\tIE:\t{}\t\t\t", self.mem[self.sp + 1], self.mem[self.sp], self.ie as u8),
+    ];
+
+    for i in 0..print_state.len() {
+      let opcode = if (self.pc + i >= 2) && (self.pc + i + print_state.len() < self.mem.len() - 2) {
+        let index = self.pc + i - 2;
+        format!("{:04X} | {:02X} {}", index, self.mem[index], self.get_opcode(index))
+      } else {
+        String::new()
+      };
+      println!("{}{}", print_state[i], opcode);
+    }
   }
 
   /// Push 16-bit data onto stack
@@ -339,6 +421,16 @@ impl State {
   }
 }
 
+pub fn emulate(buffer: Vec<u8>) {
+  let mut state = State::new(buffer);
+  loop {
+    let mut input = String::new();
+    state.print();
+    io::stdin().read_line(&mut input).unwrap();
+    state.exec();
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -360,7 +452,7 @@ mod tests {
     let a = 200;
     let b = 88;
     let c = (a as u16 + b as u16 + 1) as u8;
-    let mut state = State::new(0);
+    let mut state = State::new(vec![]);
     state.a = a;
     state.cc.cy = true;
     state.add(b, true);
@@ -373,7 +465,7 @@ mod tests {
     let a: i8 = 20;
     let b: i8 = 88;
     let c = a - b;
-    let mut state = State::new(0);
+    let mut state = State::new(vec![]);
     state.a = a as u8;
     state.add((!b + 1) as u8, false);
     println!("{:#?}", state);
@@ -385,7 +477,7 @@ mod tests {
     let a: i8 = 20;
     let b: i8 = 88;
     let c = a - b;
-    let mut state = State::new(0);
+    let mut state = State::new(vec![]);
     state.a = a as u8;
     state.cc.cy = true;
     state.add((!b + 1) as u8, true);
