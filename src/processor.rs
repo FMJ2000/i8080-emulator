@@ -1,6 +1,6 @@
 #![allow(arithmetic_overflow)]
 
-use crate::memory::{Memory, ROM_SIZE, MEM_SIZE, RAM_VIDEO};
+use crate::memory::{Memory, ROM_SIZE, MEM_SIZE, VIDEO_START};
 
 const HL: u8 = 0x02;
 
@@ -21,7 +21,7 @@ impl Flags {
 }
 
 pub struct Processor {
-  ic: u128,
+  pub ic: u128,
   pub a: u8,
   b: u8,
   c: u8,
@@ -32,7 +32,7 @@ pub struct Processor {
   sp: usize,
   pub pc: usize,
   cc: Flags,
-  ie: bool,
+  pub ie: bool,
   pub mem: Memory,
 }
 
@@ -105,9 +105,13 @@ impl Processor {
           self.pc = (self.pop() as usize) - 1;
         }
       },
-      0xC1 | 0xD1 | 0xE1 | 0xF1 => {
+      0xC1 | 0xD1 | 0xE1 => {
         let db = self.pop();
-        self.set_reg_pair(rp, db, true)
+        self.set_reg_pair(rp, db, true);
+      },
+      0xF1 => {
+        let db = self.pop() - 1;
+        self.set_reg_pair(rp, db, true);
       },
       0xC2 | 0xCA | 0xD2 | 0xDA | 0xE2 | 0xEA | 0xF2 | 0xFA => {
         if self.get_ccc(d) {
@@ -134,7 +138,7 @@ impl Processor {
         self.push((self.pc + 2) as u16);
         self.pc = (d as usize) - 1;
       },
-      0xC9 => self.pc = (self.pop() as usize) - 1,
+      0xC9 => self.pc = self.pop() as usize,
       0xCD => {
         self.push((self.pc + 2) as u16);
         self.pc = (hblb as usize) - 1;
@@ -389,8 +393,10 @@ impl Processor {
   }
 
   pub fn int(&mut self, int_num: usize) {
-    self.push(self.pc as u16);
-    self.pc = 8 * int_num;
+    if self.ie {
+      self.push(self.pc as u16);
+      self.pc = 8 * int_num;
+    }
   }
 
   /// Or value with A
@@ -420,11 +426,19 @@ impl Processor {
       let anno = if i == 0 { "PC:\t" } else if i == 2 { "->\t" } else { "\t" };
       let opcode = if (self.pc + i >= 2) && (self.pc + i + print_state.len() < MEM_SIZE - 2) {
         let index = self.pc + i - 2;
-        format!("{:04X} | {:02X} {}", index, self.mem.read(index), self.get_opcode(index))
+        let opcode = self.mem.read(index);
+        let hblb = ((self.h as usize) << 8) | (self.l as usize);
+        let mem_index = if (hblb + i >= 2) && (hblb + i + print_state.len() < MEM_SIZE - 2) { 
+          hblb + i - 2
+        } else {
+          0 
+        };
+        let memcode = self.mem.read(mem_index);
+        format!("{:04X} | {:02X}\t{}{:04X} | {:02X} {}", mem_index, memcode, anno, index, opcode, self.get_opcode(index))
       } else {
         String::new()
       };
-      println!("{}{:04X} | {:02X}\t{}{}", print_state[i], RAM_VIDEO+i, self.mem.read(RAM_VIDEO+i), anno, opcode);
+      println!("{}{}", print_state[i], opcode);
     }
   }
 

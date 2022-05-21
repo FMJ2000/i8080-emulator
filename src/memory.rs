@@ -1,7 +1,8 @@
 pub const MEM_SIZE: usize = 0x4000;
 pub const ROM_SIZE: usize = 0x2000;
 pub const RAM_SIZE: usize = 0x2000;
-pub const RAM_VIDEO: usize = 0x2400;
+pub const VIDEO_START: usize = 0x2400;
+pub const VIDEO_SIZE: usize = 0x1C00;
 
 pub struct Memory {
   rom: [u8; ROM_SIZE],
