@@ -3,15 +3,53 @@ use std::sync::{Arc, Mutex};
 use std::sync::mpsc::Receiver;
 use sdl2::keyboard::Keycode;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::processor::Processor;
-use crate::memory::{ROM_SIZE, VIDEO_SIZE, VIDEO_START};
+use crate::memory::{ROM_SIZE, VIDEO_SIZE, VIDEO_START, MEM_SIZE};
 //use crate::screen::SCREEN_F;
 
 const CPU_F: u32 = 2_000_000;
 const CPU_T: u32 = 1_000_000_000 / CPU_F;
 const VBLANK: u32 = CPU_F / 60;
+
+struct Counter {
+  line: Option<usize>,
+  add: usize,
+}
+
+impl Counter {
+  fn valid(&self, pc: usize) -> bool {
+    self.line == Some(pc) || (self.line == None && self.add == 0)
+  }
+
+  fn decrement(&mut self) {
+    if self.add > 0 {
+      self.add -= 1;
+    }
+  }
+
+  fn debug_cli(&mut self) {
+    let mut input = String::new();
+    io::stdin().read_line(&mut input).unwrap();
+    match usize::from_str_radix(input.trim(), 16) {
+      Ok(x) => self.line = Some(x),
+      _ => {
+        self.line = None;
+        let mut input_iter = input.chars();
+        self.add = if input_iter.next() == Some(':') {
+          let input: String = input_iter.collect();
+          match usize::from_str_radix(input.trim(), 16) {
+            Ok(x) => x,
+            _ => 0
+          }
+        } else {
+          0
+        };
+      }
+    }
+  }
+}
 
 pub struct KeycodeState {
   pub code: Keycode,
@@ -38,8 +76,10 @@ impl Machine {
   pub fn run(&mut self, rx: Receiver<KeycodeState>) {
     let mut counter: usize = 0;
     let mut video_counter: u32 = VBLANK;
-    let mut screen_end = false;
+    let mut screen_end = 1;
+
     loop {
+      let start = Instant::now();
       if counter <= 0 {
         if let Ok(keycode) = rx.try_recv() {
           self.key_state_change(keycode);
@@ -48,43 +88,46 @@ impl Machine {
       } else {
         counter -= 1;
       }
+      thread::sleep(Duration::new(0, 200));
       if video_counter <= 0 {
         self.map_video(screen_end);
-        screen_end ^= true;
+        screen_end = if screen_end == 1 { 2 } else { 1 };
         video_counter = VBLANK;
       } else {
         video_counter -= 1;
       }
-      thread::sleep(Duration::new(0, CPU_T));
     }
   }
 
   pub fn run_debug(&mut self, rx: Receiver<KeycodeState>) {
     let mut counter: usize = 0;
     let mut video_counter: u32 = VBLANK;
-    let mut input_counter: Option<usize> = None;
-    let mut screen_end = false;
+    let mut debug: Counter = Counter { line: None, add: 0 };
+    let mut screen_end = 1;
     loop {
       if counter <= 0 {
         if let Ok(keycode) = rx.try_recv() {
           self.key_state_change(keycode);
         }
         counter = self.exec();
-        if input_counter == None || input_counter == Some(self.cpu.pc) {
+
+        if debug.add > 0 || debug.line == None {
           self.print();
-          let mut input = String::new();
-          io::stdin().read_line(&mut input).unwrap();
-          input_counter = match usize::from_str_radix(input.trim(), 16) {
-            Ok(x) => Some(x),
-            _ => None,
-          };
         }
+        if debug.valid(self.cpu.pc) {
+          //println!("{:?}", self.cpu.mem.ram);
+          self.map_video(0);
+          debug.debug_cli();
+        } else {
+          debug.decrement();
+        }
+
       } else {
         counter -= 1;
       }
       if video_counter <= 0 {
         self.map_video(screen_end);
-        screen_end ^= true;
+        screen_end = if screen_end == 1 { 2 } else { 1 };
         video_counter = VBLANK;
       } else {
         video_counter -= 1;
@@ -111,8 +154,10 @@ impl Machine {
     }
   }
 
-  fn map_video(&mut self, screen_end: bool) {
-    self.cpu.int(if screen_end { 2 } else { 1 });
+  fn map_video(&mut self, screen_end: usize) {
+    if screen_end > 0 {
+      self.cpu.int(screen_end);
+    }
     /*if self.cpu.ie {
       println!("Interrupt");
       self.cpu.print();
@@ -125,6 +170,8 @@ impl Machine {
       }
     }
   }
+
+  
 
   pub fn print(&self) {
     self.cpu.print();

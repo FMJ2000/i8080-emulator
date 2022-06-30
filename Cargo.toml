@@ -7,6 +7,7 @@ edition = "2021"
 
 [dependencies]
 sdl2 = "0.32.1"
+tokio = { version = "1.18.2", features = ["full"] }
 
 [profile.dev]
 overflow-checks = false

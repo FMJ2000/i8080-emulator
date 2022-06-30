@@ -4,9 +4,10 @@ pub const RAM_SIZE: usize = 0x2000;
 pub const VIDEO_START: usize = 0x2400;
 pub const VIDEO_SIZE: usize = 0x1C00;
 
+#[derive(Debug)]
 pub struct Memory {
-  rom: [u8; ROM_SIZE],
-  ram: [u8; RAM_SIZE],
+  pub rom: [u8; ROM_SIZE],
+  pub ram: [u8; RAM_SIZE],
 }
 
 impl Memory {

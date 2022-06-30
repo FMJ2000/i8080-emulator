@@ -123,7 +123,7 @@ impl Processor {
       0xC3 => self.pc = (hblb as usize) - 1,
       0xC4 | 0xCC | 0xD4 | 0xDC | 0xE4 | 0xEC | 0xF4 | 0xFC => {
         if self.get_ccc(d) {
-          self.push((self.pc + 2) as u16);
+          self.push((self.pc + 3) as u16);
           self.pc = (hblb as usize) - 1;
         } else {
           self.pc += 2;
@@ -135,12 +135,12 @@ impl Processor {
         self.pc += 1;
       },
       0xC7 | 0xCF | 0xD7 | 0xDF | 0xE7 | 0xEF | 0xF7 | 0xFF => {
-        self.push((self.pc + 2) as u16);
+        self.push((self.pc + 3) as u16);
         self.pc = (d as usize) - 1;
       },
-      0xC9 => self.pc = self.pop() as usize,
+      0xC9 => self.pc = (self.pop() as usize) - 1,
       0xCD => {
-        self.push((self.pc + 2) as u16);
+        self.push((self.pc + 3) as u16);
         self.pc = (hblb as usize) - 1;
       },
       0xD3 | 0xDB => self.pc += 1,
